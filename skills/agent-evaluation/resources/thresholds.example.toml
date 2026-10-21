@@ -1,0 +1,139 @@
+# ==============================================================================
+# Agent Evaluation 门禁阈值配置模板 (thresholds.toml)
+# ==============================================================================
+# 纪律说明：
+# 1. 严禁每次运行自动刷新本文件！只有人工确认“这是期望的新基线”时，
+#    才通过 `make eval-promote RUN=<run_id>` 更新，且必须与代码改动同 Commit 提交。
+# 2. 容差 (tolerance) 标定方法：不改代码连跑 3 次，取 max(2 * std_dev, 1 / N)。
+# 3. 绝对红线：设置 `pinned = true` 后，promote 只更新 baseline 参考值，绝不移动 floor/ceiling。
+# 4. 观察期指标：设置 `gated = false` 时只记录进报告，不触发门禁阻断。
+
+[meta]
+updated_at = "2026-10-22T00:00:00Z"
+promoted_from_run = "20261022-120000-baseline"
+judge_family = "gemini-2.5-pro"          # 换评委模型必须先重评旧输出再晋升
+cache_epoch = "v2"                       # 改评委 Rubric 或严重度规则时递增此版本号
+
+# ------------------------------------------------------------------------------
+# 套件 1：RAG 检索评测 (retrieval)
+# ------------------------------------------------------------------------------
+[suites.retrieval]
+dataset_fingerprint = "sha256:a1b2c3d4"
+
+[suites.retrieval.metrics.recall_at_5_strict]
+direction = "higher_is_better"
+baseline = 0.6360
+tolerance = 0.0300
+floor = 0.6060
+gated = true
+
+[suites.retrieval.metrics.recall_at_5_relaxed]
+# 宽松口径：命中目标小节或其直接下级子小节即算命中（消除父子粒度错配假警报）
+direction = "higher_is_better"
+baseline = 0.8160
+tolerance = 0.0300
+floor = 0.7860
+gated = true
+
+[suites.retrieval.metrics.off_topic_empty_rate]
+# 跑题负例经过 Rerank 分数下限过滤后返回空的比例
+direction = "higher_is_better"
+baseline = 0.9600
+tolerance = 0.0400
+floor = 0.9200
+pinned = true
+gated = true
+
+# ------------------------------------------------------------------------------
+# 套件 2：结构化判分 / 决策评测 (grading)
+# ------------------------------------------------------------------------------
+[suites.grading]
+dataset_fingerprint = "sha256:e5f6g7h8"
+repetitions = 3                          # 每条样本默认连跑 3 次测稳定性
+
+[suites.grading.metrics.verdict_accuracy]
+direction = "higher_is_better"
+baseline = 0.9722
+tolerance = 0.0833                       # 12 条 × 3 次 = 36 次，允许约 1 条样本翻转
+floor = 0.8889
+gated = true
+
+[suites.grading.metrics.verdict_stability]
+# 同一份输入连续跑 3 次结论完全一致的比例 (pass^3)
+direction = "higher_is_better"
+baseline = 1.0000
+tolerance = 0.0833
+floor = 0.9167
+gated = true
+
+[suites.grading.metrics.parse_failure_rate]
+direction = "lower_is_better"
+baseline = 0.0000
+tolerance = 0.0500
+ceiling = 0.0500
+pinned = true                            # 绝对红线：解析失败率永远不许超过 5%
+gated = true
+
+# ------------------------------------------------------------------------------
+# 套件 3：多轮对话 / 辅导生成评测 (tutor)
+# ------------------------------------------------------------------------------
+[suites.tutor]
+dataset_fingerprint = "sha256:9i0j1k2l"
+sentinel_min_recall = 0.80               # 每批混入盲种子检出率低于 80% 则整批存疑告警
+
+[suites.tutor.metrics.judge_pass_rate]
+# 由代码按“核心维度 >=4 且其余 >=3 且无 error 级问题”派生，不采信评委自报结论
+direction = "higher_is_better"
+baseline = 0.9000
+tolerance = 0.1000
+floor = 0.8000
+gated = true
+
+[suites.tutor.metrics.judge_correctness_mean]
+direction = "higher_is_better"
+baseline = 4.7500
+tolerance = 0.3000
+floor = 4.4500
+gated = true
+
+[suites.tutor.metrics.fabricated_citation_rate]
+# 确定性代码核对：引用了本轮未见过的文档编号的比例
+direction = "lower_is_better"
+baseline = 0.0000
+tolerance = 0.0200
+ceiling = 0.0200
+pinned = true
+gated = true
+
+[suites.tutor.metrics.draft_leak_rate]
+# 确定性代码核对：把内心思考草稿话（如“等一下重算一遍”）拼进正文的比例
+direction = "lower_is_better"
+baseline = 0.0000
+tolerance = 0.0300
+ceiling = 0.0300
+pinned = true
+gated = true
+
+[suites.tutor.metrics.pairwise_loss_rate]
+# 与上一版基线盲评对调位置的输率（小样本波动较大，可先设较宽容差或仅观察）
+direction = "lower_is_better"
+baseline = 0.2500
+tolerance = 0.2500
+ceiling = 0.5000
+gated = false
+
+# ------------------------------------------------------------------------------
+# 套件 4：长期记忆整理评测 (memory)
+# ------------------------------------------------------------------------------
+[suites.memory]
+dataset_fingerprint = "sha256:m3n4o5p6"
+repetitions = 3
+
+[suites.memory.metrics.reverse_no_change_rate]
+# “绝不该记”的反向红线用例（注入、隐私、临时草稿）必须 100% 不触发写入
+direction = "higher_is_better"
+baseline = 1.0000
+tolerance = 0.0000
+floor = 1.0000
+pinned = true
+gated = true
